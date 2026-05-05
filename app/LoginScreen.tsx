@@ -1,168 +1,61 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
-import { saveUser, type User } from '../lib/auth';
+import { api } from '../lib/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function LoginScreen({ navigation }: any) {
-  const [activeTab, setActiveTab] = useState<'email' | 'phone'>('email');
-  const [emailLogin, setEmailLogin] = useState({ email: '', password: '' });
-  const [phoneLogin, setPhoneLogin] = useState({ phone: '', otp: '' });
-  const [otpSent, setOtpSent] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleEmailLogin = async () => {
-    setLoading(true);
-
-    const mockUser: User = {
-      id: 'user_' + Date.now(),
-      name: 'Demo User',
-      email: emailLogin.email,
-      phone: '+1234567890',
-      guardians: [],
-      permissions: {
-        location: true,
-        camera: true,
-        microphone: true,
-        sms: true,
-      },
-    };
-
-    await saveUser(mockUser);
-    setLoading(false);
-    navigation.replace('Dashboard');
-  };
-
-  const handlePhoneLogin = async () => {
-    if (!otpSent) {
-      setOtpSent(true);
+  const handleLogin = async () => {
+    if (!email || !password) {
+      Alert.alert('Error', 'Please fill in all fields');
       return;
     }
-
     setLoading(true);
-    const mockUser: User = {
-      id: 'user_' + Date.now(),
-      name: 'Demo User',
-      email: '',
-      phone: phoneLogin.phone,
-      guardians: [],
-      permissions: {
-        location: true,
-        camera: true,
-        microphone: true,
-        sms: true,
-      },
-    };
-
-    await saveUser(mockUser);
-    setLoading(false);
-    navigation.replace('Dashboard');
+    try {
+      const result = await api.signIn({ email, password });
+      if (result.error) throw new Error(result.error);
+      await AsyncStorage.setItem('sheriff_token', result.token);
+      await AsyncStorage.setItem('sheriff_user_id', result.user.id);
+      await AsyncStorage.setItem('sheriff_user_name', result.user.fullName || '');
+      await AsyncStorage.setItem('sheriff_user_email', result.user.email || '');
+      navigation.replace('Dashboard');
+    } catch (error: any) {
+      Alert.alert('Login Failed', error.message || 'Invalid email or password');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <LinearGradient
-      colors={['#2563eb', '#3b82f6', '#06b6d4']}
-      style={styles.container}
-    >
+    <LinearGradient colors={['#7c3aed', '#9333ea', '#ec4899']} style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            style={styles.backButton}
-          >
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
-          <Image
-            source={require('../assets/logo.jpeg')}
-            style={styles.logo}
-            resizeMode="contain"
-          />
+          <Text style={styles.headerTitle}>SheRiff</Text>
           <View style={styles.placeholder} />
         </View>
 
         <View style={styles.content}>
           <Text style={styles.title}>Welcome Back</Text>
-          <Text style={styles.subtitle}>Login to continue your safety journey</Text>
+          <Text style={styles.subtitle}>Login to your account</Text>
 
-          <View style={styles.tabs}>
-            <TouchableOpacity
-              onPress={() => setActiveTab('email')}
-              style={[styles.tab, activeTab === 'email' && styles.activeTab]}
-            >
-              <Ionicons name="mail" size={16} color={activeTab === 'email' ? '#2563eb' : '#fff'} />
-              <Text style={[styles.tabText, activeTab === 'email' && styles.activeTabText]}>
-                Email
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => setActiveTab('phone')}
-              style={[styles.tab, activeTab === 'phone' && styles.activeTab]}
-            >
-              <Ionicons name="call" size={16} color={activeTab === 'phone' ? '#2563eb' : '#fff'} />
-              <Text style={[styles.tabText, activeTab === 'phone' && styles.activeTabText]}>
-                Phone
-              </Text>
-            </TouchableOpacity>
+          <View style={styles.form}>
+            <Input label="Email" value={email} onChangeText={setEmail} placeholder="your@email.com" keyboardType="email-address" autoCapitalize="none" />
+            <Input label="Password" value={password} onChangeText={setPassword} placeholder="Your password" secureTextEntry />
+            <Button onPress={handleLogin} size="lg" loading={loading}>Login</Button>
           </View>
 
-          {activeTab === 'email' ? (
-            <View style={styles.form}>
-              <Input
-                label="Email"
-                value={emailLogin.email}
-                onChangeText={(text) => setEmailLogin({ ...emailLogin, email: text })}
-                placeholder="your@email.com"
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-              <Input
-                label="Password"
-                value={emailLogin.password}
-                onChangeText={(text) => setEmailLogin({ ...emailLogin, password: text })}
-                placeholder="Enter your password"
-                secureTextEntry
-              />
-              <Button onPress={handleEmailLogin} size="lg" loading={loading}>
-                Login
-              </Button>
-            </View>
-          ) : (
-            <View style={styles.form}>
-              <Input
-                label="Phone Number"
-                value={phoneLogin.phone}
-                onChangeText={(text) => setPhoneLogin({ ...phoneLogin, phone: text })}
-                placeholder="+1 234 567 8900"
-                keyboardType="phone-pad"
-                editable={!otpSent}
-              />
-              {otpSent && (
-                <Input
-                  label="Enter OTP"
-                  value={phoneLogin.otp}
-                  onChangeText={(text) => setPhoneLogin({ ...phoneLogin, otp: text })}
-                  placeholder="123456"
-                  keyboardType="numeric"
-                />
-              )}
-              <Button onPress={handlePhoneLogin} size="lg" loading={loading}>
-                {otpSent ? 'Verify OTP' : 'Send OTP'}
-              </Button>
-            </View>
-          )}
-
           <View style={styles.footer}>
-            <Text style={styles.footerText}>
-              Don't have an account?{' '}
-              <Text
-                style={styles.link}
-                onPress={() => navigation.navigate('Signup')}
-              >
-                Sign Up
-              </Text>
-            </Text>
+            <Text style={styles.footerText}>Don't have an account? <Text style={styles.link} onPress={() => navigation.navigate('Signup')}>Sign Up</Text></Text>
           </View>
         </View>
       </ScrollView>
@@ -171,84 +64,17 @@ export default function LoginScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 24,
-    paddingTop: 60,
-    paddingBottom: 24,
-  },
-  backButton: {
-    width: 40,
-  },
-  logo: {
-    width: 96,
-    height: 96,
-  },
-  placeholder: {
-    width: 40,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 24,
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginBottom: 32,
-  },
-  tabs: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 8,
-    marginBottom: 24,
-  },
-  tab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    gap: 8,
-  },
-  activeTab: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-  },
-  tabText: {
-    color: '#fff',
-    fontWeight: '600',
-  },
-  activeTabText: {
-    color: '#2563eb',
-  },
-  form: {
-    gap: 16,
-  },
-  footer: {
-    marginTop: 24,
-    alignItems: 'center',
-  },
-  footerText: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 14,
-  },
-  link: {
-    color: '#fff',
-    fontWeight: '600',
-    textDecorationLine: 'underline',
-  },
+  container: { flex: 1 },
+  scrollContent: { flexGrow: 1 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingTop: 60, paddingBottom: 24 },
+  backButton: { width: 40 },
+  headerTitle: { fontSize: 24, fontWeight: 'bold', color: '#fff' },
+  placeholder: { width: 40 },
+  content: { flex: 1, paddingHorizontal: 24 },
+  title: { fontSize: 32, fontWeight: 'bold', color: '#fff', marginBottom: 8 },
+  subtitle: { fontSize: 16, color: 'rgba(255,255,255,0.8)', marginBottom: 32 },
+  form: { gap: 16 },
+  footer: { marginTop: 32, marginBottom: 24, alignItems: 'center' },
+  footerText: { color: 'rgba(255,255,255,0.8)', fontSize: 14 },
+  link: { color: '#fff', fontWeight: '600', textDecorationLine: 'underline' },
 });

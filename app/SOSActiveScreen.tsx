@@ -1,398 +1,128 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, Vibration } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { Button } from '../components/Button';
-import { Card } from '../components/Card';
-import { getUser, type User } from '../lib/auth';
+import * as Location from 'expo-location';
+import { api } from '../lib/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function SOSActiveScreen({ navigation }: any) {
-  const [user, setUser] = useState<User | null>(null);
   const [countdown, setCountdown] = useState(5);
-  const [sosActive, setSosActive] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const pulseAnim = useState(new Animated.Value(1))[0];
+  const [sosTriggered, setSosTriggered] = useState(false);
+  const [location, setLocation] = useState<any>(null);
+  const [sosId, setSosId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    loadUser();
+    getLocation();
+    Vibration.vibrate([500, 500, 500, 500, 500]);
 
-    // Pulse animation
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.2,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
-  }, []);
-
-  useEffect(() => {
-    if (countdown > 0) {
+    if (countdown > 0 && !sosTriggered) {
       const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
       return () => clearTimeout(timer);
-    } else if (!sosActive) {
-      activateSOS();
+    } else if (countdown === 0 && !sosTriggered) {
+      triggerSOS();
     }
-  }, [countdown, sosActive]);
+  }, [countdown, sosTriggered]);
 
-  const loadUser = async () => {
-    const userData = await getUser();
-    setUser(userData);
-  };
-
-  const activateSOS = () => {
-    setSosActive(true);
-    setRecording(true);
-  };
-
-  const handleCancel = () => {
-    if (!sosActive) {
-      setCountdown(0);
-      navigation.navigate('Dashboard');
+  const getLocation = async () => {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status === 'granted') {
+      const loc = await Location.getCurrentPositionAsync({});
+      setLocation(loc.coords);
     }
   };
 
-  const handleDeactivate = () => {
-    setSosActive(false);
-    setRecording(false);
-    navigation.navigate('Dashboard');
+  const triggerSOS = async () => {
+    if (sosTriggered) return;
+    setSosTriggered(true);
+    setLoading(true);
+
+    try {
+      const userId = await AsyncStorage.getItem('sheriff_user_id');
+      const lat = location?.latitude || 0;
+      const lng = location?.longitude || 0;
+
+      const result = await api.triggerSOS({
+        userId: userId || 'demo-user',
+        lat,
+        lng,
+      });
+
+      setSosId(result.sosId);
+      Alert.alert(
+        'SOS Sent!',
+        'Emergency alert sent to ' + (result.guardianCount || 0) + ' guardian(s)',
+        [{ text: 'OK' }]
+      );
+    } catch (error) {
+      console.error('SOS Error:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleCallGuardian = (guardian: any) => {
-    // Linking.openURL(`tel:${guardian.phone}`);
+  const handleCancel = async () => {
+    if (sosId) {
+      await api.resolveSOS({ sosId });
+    }
+    Vibration.cancel();
+    navigation.goBack();
   };
 
-  if (!sosActive && countdown > 0) {
-    return (
-      <View style={styles.countdownContainer}>
-        <View style={styles.countdownContent}>
-          <Animated.View style={[styles.countdownCircle, { transform: [{ scale: pulseAnim }] }]}>
-            <Text style={styles.countdownNumber}>{countdown}</Text>
-          </Animated.View>
-          <Text style={styles.countdownTitle}>Activating SOS</Text>
-          <Text style={styles.countdownSubtitle}>Emergency alert will be sent</Text>
-        </View>
-
-        <Button
-          onPress={handleCancel}
-          variant="outline"
-          size="lg"
-          style={styles.cancelButton}
-        >
-          <View style={styles.buttonContent}>
-            <Ionicons name="close" size={20} color="#fff" />
-            <Text style={styles.cancelButtonText}>Cancel</Text>
-          </View>
-        </Button>
-      </View>
-    );
-  }
+  const handleManualTrigger = () => {
+    setCountdown(0);
+  };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <View style={styles.headerLeft}>
-            <View style={styles.pulseDot} />
-            <Text style={styles.headerTitle}>EMERGENCY ACTIVE</Text>
+    <LinearGradient colors={['#dc2626', '#ef4444', '#f87171']} style={styles.container}>
+      <View style={styles.content}>
+        <Ionicons name="warning" size={80} color="#fff" />
+
+        <Text style={styles.title}>
+          {sosTriggered ? 'SOS ACTIVE' : 'SOS IN ' + countdown + 's'}
+        </Text>
+
+        <Text style={styles.subtitle}>
+          {sosTriggered
+            ? 'Emergency alert sent to your guardians'
+            : 'Sending emergency alert automatically'}
+        </Text>
+
+        {location && (
+          <View style={styles.locationCard}>
+            <Ionicons name="location" size={20} color="#fff" />
+            <Text style={styles.locationText}>
+              {location.latitude.toFixed(4)}, {location.longitude.toFixed(4)}
+            </Text>
           </View>
-        </View>
-      </View>
-
-      <ScrollView style={styles.scrollContent}>
-        <Card style={styles.statusCard}>
-          <Ionicons name="alert-circle" size={64} color="#fff" style={styles.statusIcon} />
-          <Text style={styles.statusTitle}>SOS Activated</Text>
-          <Text style={styles.statusSubtitle}>Help is on the way. Stay calm and safe.</Text>
-        </Card>
-
-        <Card style={styles.actionsCard}>
-          <Text style={styles.cardTitle}>Emergency Actions</Text>
-
-          <View style={styles.actionItem}>
-            <Ionicons name="checkmark-circle" size={20} color="#4ade80" />
-            <View style={styles.actionText}>
-              <Text style={styles.actionTitle}>Location Shared</Text>
-              <Text style={styles.actionSubtitle}>All guardians can see your location</Text>
-            </View>
-          </View>
-
-          <View style={styles.actionItem}>
-            <Ionicons name="checkmark-circle" size={20} color="#4ade80" />
-            <View style={styles.actionText}>
-              <Text style={styles.actionTitle}>Emergency Contacts Notified</Text>
-              <Text style={styles.actionSubtitle}>{user?.guardians.length || 0} contacts alerted</Text>
-            </View>
-          </View>
-
-          <View style={styles.actionItem}>
-            <Ionicons name="checkmark-circle" size={20} color="#4ade80" />
-            <View style={styles.actionText}>
-              <Text style={styles.actionTitle}>Calling Emergency Contact</Text>
-              <Text style={styles.actionSubtitle}>Calling {user?.guardians[0]?.name || 'Guardian'}</Text>
-            </View>
-          </View>
-
-          {recording && (
-            <View style={styles.actionItem}>
-              <View style={styles.recordingDot} />
-              <View style={styles.actionText}>
-                <Text style={styles.actionTitle}>Recording Evidence</Text>
-                <Text style={styles.actionSubtitle}>Audio/Video being captured</Text>
-              </View>
-            </View>
-          )}
-        </Card>
-
-        {user && user.guardians.length > 0 && (
-          <Card style={styles.guardiansCard}>
-            <Text style={styles.cardTitle}>Guardians Notified</Text>
-            <View style={styles.guardiansList}>
-              {user.guardians.map((guardian) => (
-                <View key={guardian.id} style={styles.guardianItem}>
-                  <View style={styles.guardianInfo}>
-                    <Text style={styles.guardianName}>{guardian.name}</Text>
-                    <Text style={styles.guardianPhone}>{guardian.phone}</Text>
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => handleCallGuardian(guardian)}
-                    style={styles.callButton}
-                  >
-                    <Ionicons name="call" size={16} color="#fff" />
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
-          </Card>
         )}
 
-        <Card style={styles.locationCard}>
-          <View style={styles.locationHeader}>
-            <Ionicons name="location" size={20} color="#fff" />
-            <Text style={styles.locationTitle}>Current Location</Text>
-          </View>
-          <Text style={styles.locationText}>Your location is being shared in real-time</Text>
-        </Card>
+        {!sosTriggered && (
+          <TouchableOpacity style={styles.triggerButton} onPress={handleManualTrigger}>
+            <Text style={styles.triggerText}>Send Now</Text>
+          </TouchableOpacity>
+        )}
 
-        <Button
-          onPress={handleDeactivate}
-          size="lg"
-          variant="outline"
-          style={styles.deactivateButton}
-        >
-          I'm Safe - Deactivate SOS
-        </Button>
-      </ScrollView>
-    </View>
+        <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
+          <Text style={styles.cancelText}>
+            {sosTriggered ? 'Mark as Safe' : 'Cancel'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  countdownContainer: {
-    flex: 1,
-    backgroundColor: '#dc2626',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-  },
-  countdownContent: {
-    alignItems: 'center',
-    marginBottom: 48,
-  },
-  countdownCircle: {
-    width: 128,
-    height: 128,
-    borderRadius: 64,
-    backgroundColor: '#fff',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  countdownNumber: {
-    fontSize: 64,
-    fontWeight: 'bold',
-    color: '#dc2626',
-  },
-  countdownTitle: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 8,
-  },
-  countdownSubtitle: {
-    fontSize: 20,
-    color: '#fecaca',
-  },
-  cancelButton: {
-    borderColor: '#fff',
-    borderWidth: 2,
-  },
-  buttonContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  cancelButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  container: {
-    flex: 1,
-    backgroundColor: '#dc2626',
-  },
-  header: {
-    backgroundColor: 'rgba(185, 28, 28, 0.5)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(220, 38, 38, 0.5)',
-    paddingTop: 60,
-    paddingBottom: 16,
-  },
-  headerContent: {
-    paddingHorizontal: 24,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  pulseDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#fff',
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  scrollContent: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 24,
-  },
-  statusCard: {
-    padding: 24,
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  statusIcon: {
-    marginBottom: 16,
-  },
-  statusTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 8,
-  },
-  statusSubtitle: {
-    fontSize: 16,
-    color: '#fecaca',
-    textAlign: 'center',
-  },
-  actionsCard: {
-    padding: 24,
-    marginBottom: 24,
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 16,
-  },
-  actionItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    marginBottom: 16,
-  },
-  actionText: {
-    flex: 1,
-  },
-  actionTitle: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  actionSubtitle: {
-    fontSize: 14,
-    color: '#fecaca',
-  },
-  recordingDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#f87171',
-    marginTop: 4,
-  },
-  guardiansCard: {
-    padding: 24,
-    marginBottom: 24,
-  },
-  guardiansList: {
-    gap: 8,
-  },
-  guardianItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 8,
-  },
-  guardianInfo: {
-    flex: 1,
-  },
-  guardianName: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  guardianPhone: {
-    fontSize: 14,
-    color: '#fecaca',
-  },
-  callButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#fff',
-  },
-  locationCard: {
-    padding: 16,
-    marginBottom: 24,
-  },
-  locationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  locationTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  locationText: {
-    fontSize: 14,
-    color: '#fecaca',
-  },
-  deactivateButton: {
-    marginBottom: 24,
-    borderColor: '#fff',
-    borderWidth: 2,
-  },
+  container: { flex: 1 },
+  content: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 24 },
+  title: { fontSize: 48, fontWeight: 'bold', color: '#fff', textAlign: 'center' },
+  subtitle: { fontSize: 18, color: 'rgba(255,255,255,0.9)', textAlign: 'center' },
+  locationCard: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(255,255,255,0.2)', padding: 12, borderRadius: 12 },
+  locationText: { color: '#fff', fontSize: 14 },
+  triggerButton: { backgroundColor: '#fff', paddingHorizontal: 48, paddingVertical: 16, borderRadius: 50 },
+  triggerText: { color: '#dc2626', fontSize: 20, fontWeight: 'bold' },
+  cancelButton: { borderWidth: 2, borderColor: '#fff', paddingHorizontal: 48, paddingVertical: 16, borderRadius: 50 },
+  cancelText: { color: '#fff', fontSize: 18, fontWeight: '600' },
 });

@@ -4,6 +4,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
+import { api } from '../lib/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function SignupScreen({ navigation }: any) {
   const [activeTab, setActiveTab] = useState<'email' | 'phone'>('email');
@@ -15,7 +17,7 @@ export default function SignupScreen({ navigation }: any) {
   const [otpSent, setOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const handleEmailSignup = () => {
+  const handleEmailSignup = async () => {
     if (!name || !email || !password) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
@@ -25,35 +27,55 @@ export default function SignupScreen({ navigation }: any) {
       return;
     }
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      const result = await api.signUp({ email, password, fullName: name });
+      if (result.error) throw new Error(result.error);
+      await AsyncStorage.setItem('sheriff_user_id', result.userId);
+      await AsyncStorage.setItem('sheriff_user_name', name);
+      await AsyncStorage.setItem('sheriff_user_email', email);
       navigation.navigate('ProfileSetup');
-    }, 1000);
+    } catch (error: any) {
+      Alert.alert('Signup Failed', error.message || 'Something went wrong');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleSendOTP = () => {
+  const handleSendOTP = async () => {
     if (!name || !phone) {
-      Alert.alert('Error', 'Please enter your name and phone number');
+      Alert.alert('Error', 'Please enter name and phone number');
       return;
     }
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      const result = await api.signUp({ email: phone + '@sheriff.app', password: 'Sheriff@123', fullName: name, phone });
+      if (result.error) throw new Error(result.error);
       setOtpSent(true);
-      Alert.alert('OTP Sent', 'Enter 123456 for demo purposes');
-    }, 1000);
+      Alert.alert('Success', 'Account created! Please verify your phone.');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to send OTP');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleVerifyOTP = () => {
+  const handleVerifyOTP = async () => {
     if (!otp) {
       Alert.alert('Error', 'Please enter the OTP');
       return;
     }
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    try {
+      const result = await api.verifyOtp({ phone, token: otp });
+      if (result.error) throw new Error(result.error);
+      await AsyncStorage.setItem('sheriff_user_name', name);
+      await AsyncStorage.setItem('sheriff_user_phone', phone);
       navigation.navigate('ProfileSetup');
-    }, 1000);
+    } catch (error: any) {
+      Alert.alert('Verification Failed', error.message || 'Invalid OTP');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -72,17 +94,11 @@ export default function SignupScreen({ navigation }: any) {
           <Text style={styles.subtitle}>Join SheRiff for your safety</Text>
 
           <View style={styles.tabs}>
-            <TouchableOpacity
-              onPress={() => setActiveTab('email')}
-              style={[styles.tab, activeTab === 'email' && styles.activeTab]}
-            >
+            <TouchableOpacity onPress={() => setActiveTab('email')} style={[styles.tab, activeTab === 'email' && styles.activeTab]}>
               <Ionicons name="mail" size={16} color={activeTab === 'email' ? '#059669' : '#fff'} />
               <Text style={[styles.tabText, activeTab === 'email' && styles.activeTabText]}>Email</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => setActiveTab('phone')}
-              style={[styles.tab, activeTab === 'phone' && styles.activeTab]}
-            >
+            <TouchableOpacity onPress={() => setActiveTab('phone')} style={[styles.tab, activeTab === 'phone' && styles.activeTab]}>
               <Ionicons name="call" size={16} color={activeTab === 'phone' ? '#059669' : '#fff'} />
               <Text style={[styles.tabText, activeTab === 'phone' && styles.activeTabText]}>Phone</Text>
             </TouchableOpacity>
@@ -99,25 +115,16 @@ export default function SignupScreen({ navigation }: any) {
             <View style={styles.form}>
               <Input label="Full Name" value={name} onChangeText={setName} placeholder="Your name" editable={!otpSent} />
               <Input label="Phone Number" value={phone} onChangeText={setPhone} placeholder="+91XXXXXXXXXX" keyboardType="phone-pad" editable={!otpSent} />
-              {otpSent && (
-                <Input label="Enter OTP" value={otp} onChangeText={setOtp} placeholder="123456" keyboardType="numeric" />
-              )}
+              {otpSent && <Input label="Enter OTP" value={otp} onChangeText={setOtp} placeholder="123456" keyboardType="numeric" />}
               <Button onPress={otpSent ? handleVerifyOTP : handleSendOTP} size="lg" loading={loading}>
                 {otpSent ? 'Verify OTP' : 'Send OTP'}
               </Button>
-              {otpSent && (
-                <TouchableOpacity onPress={() => setOtpSent(false)}>
-                  <Text style={styles.resendText}>Wrong number? Go back</Text>
-                </TouchableOpacity>
-              )}
+              {otpSent && <TouchableOpacity onPress={() => setOtpSent(false)}><Text style={styles.resendText}>Wrong number? Go back</Text></TouchableOpacity>}
             </View>
           )}
 
           <View style={styles.footer}>
-            <Text style={styles.footerText}>
-              Already have an account?{' '}
-              <Text style={styles.link} onPress={() => navigation.navigate('Login')}>Login</Text>
-            </Text>
+            <Text style={styles.footerText}>Already have an account? <Text style={styles.link} onPress={() => navigation.navigate('Login')}>Login</Text></Text>
           </View>
         </View>
       </ScrollView>

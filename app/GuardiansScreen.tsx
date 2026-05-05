@@ -1,267 +1,151 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, TextInput, Modal } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../components/Button';
-import { Card } from '../components/Card';
-import { Input } from '../components/Input';
-import { getUser, saveUser, type Guardian, type User } from '../lib/auth';
+import { api } from '../lib/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+interface Guardian {
+  id?: string;
+  guardian_name: string;
+  guardian_phone: string;
+  relationship: string;
+}
 
 export default function GuardiansScreen({ navigation }: any) {
-  const [user, setUser] = useState<User | null>(null);
   const [guardians, setGuardians] = useState<Guardian[]>([]);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [newGuardian, setNewGuardian] = useState({
-    name: '',
-    phone: '',
-    email: '',
-    relationship: '',
-  });
+  const [modalVisible, setModalVisible] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [newGuardian, setNewGuardian] = useState({ name: '', phone: '', relationship: '' });
 
-  React.useEffect(() => {
-    loadUser();
+  useEffect(() => {
+    loadGuardians();
   }, []);
 
-  const loadUser = async () => {
-    const userData = await getUser();
-    setUser(userData);
-    setGuardians(userData?.guardians || []);
+  const loadGuardians = async () => {
+    try {
+      const userId = await AsyncStorage.getItem('sheriff_user_id');
+      if (!userId) return;
+      const result = await api.getProfile(userId);
+      if (result.guardians) setGuardians(result.guardians);
+    } catch (error) {
+      console.error('Load guardians error:', error);
+    }
   };
 
   const handleAddGuardian = async () => {
-    if (!newGuardian.name || !newGuardian.phone) return;
-
-    const guardian: Guardian = {
-      id: 'guardian_' + Date.now(),
-      ...newGuardian,
-    };
-
-    const updatedGuardians = [...guardians, guardian];
-    setGuardians(updatedGuardians);
-
-    if (user) {
-      user.guardians = updatedGuardians;
-      await saveUser(user);
+    if (!newGuardian.name || !newGuardian.phone) {
+      Alert.alert('Error', 'Please enter name and phone number');
+      return;
     }
-
-    setNewGuardian({ name: '', phone: '', email: '', relationship: '' });
-    setShowAddForm(false);
-  };
-
-  const handleRemoveGuardian = async (id: string) => {
-    const updatedGuardians = guardians.filter((g) => g.id !== id);
-    setGuardians(updatedGuardians);
-
-    if (user) {
-      user.guardians = updatedGuardians;
-      await saveUser(user);
+    setLoading(true);
+    try {
+      const userId = await AsyncStorage.getItem('sheriff_user_id');
+      const result = await api.addGuardian({
+        userId: userId || '',
+        name: newGuardian.name,
+        phone: newGuardian.phone,
+        relationship: newGuardian.relationship,
+      });
+      if (result.error) throw new Error(result.error);
+      setGuardians([...guardians, result.guardian]);
+      setNewGuardian({ name: '', phone: '', relationship: '' });
+      setModalVisible(false);
+      Alert.alert('Success', 'Guardian added successfully!');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to add guardian');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <LinearGradient colors={['#9333ea', '#7e22ce']} style={styles.container}>
+    <LinearGradient colors={['#7c3aed', '#9333ea']} style={styles.container}>
       <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Emergency Contacts</Text>
-          <TouchableOpacity onPress={() => setShowAddForm(!showAddForm)}>
-            <View style={styles.addButton}>
-              <Ionicons name="add" size={16} color="#9333ea" />
-              <Text style={styles.addButtonText}>Add</Text>
-            </View>
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>My Guardians</Text>
+        <TouchableOpacity onPress={() => setModalVisible(true)}>
+          <Ionicons name="add-circle" size={28} color="#fff" />
+        </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.scrollContent}>
-        <Text style={styles.title}>Your Safety Network</Text>
-        <Text style={styles.subtitle}>
-          These trusted contacts will be notified during emergencies
-        </Text>
-
-        {showAddForm && (
-          <Card style={styles.card}>
-            <Text style={styles.cardTitle}>Add Emergency Contact</Text>
-            <Input
-              label="Full Name *"
-              value={newGuardian.name}
-              onChangeText={(text) => setNewGuardian({ ...newGuardian, name: text })}
-              placeholder="Enter name"
-            />
-            <Input
-              label="Phone Number *"
-              value={newGuardian.phone}
-              onChangeText={(text) => setNewGuardian({ ...newGuardian, phone: text })}
-              placeholder="+1 234 567 8900"
-              keyboardType="phone-pad"
-            />
-            <Input
-              label="Email (Optional)"
-              value={newGuardian.email}
-              onChangeText={(text) => setNewGuardian({ ...newGuardian, email: text })}
-              placeholder="email@example.com"
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-            <Input
-              label="Relationship (Optional)"
-              value={newGuardian.relationship}
-              onChangeText={(text) => setNewGuardian({ ...newGuardian, relationship: text })}
-              placeholder="e.g., Mother, Friend"
-            />
-            <View style={styles.formActions}>
-              <Button onPress={handleAddGuardian} style={styles.saveButton}>
-                Add Guardian
-              </Button>
-              <Button
-                onPress={() => setShowAddForm(false)}
-                variant="outline"
-              >
-                Cancel
-              </Button>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        {guardians.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Ionicons name="people-outline" size={64} color="rgba(255,255,255,0.5)" />
+            <Text style={styles.emptyTitle}>No Guardians Yet</Text>
+            <Text style={styles.emptySubtitle}>Add trusted contacts who will receive your SOS alerts</Text>
+            <Button onPress={() => setModalVisible(true)} size="lg" style={styles.addFirstButton}>
+              Add First Guardian
+            </Button>
+          </View>
+        ) : (
+          guardians.map((g, index) => (
+            <View key={index} style={styles.guardianCard}>
+              <View style={styles.guardianAvatar}>
+                <Ionicons name="person" size={24} color="#fff" />
+              </View>
+              <View style={styles.guardianInfo}>
+                <Text style={styles.guardianName}>{g.guardian_name}</Text>
+                <Text style={styles.guardianPhone}>{g.guardian_phone}</Text>
+                <Text style={styles.guardianRel}>{g.relationship}</Text>
+              </View>
+              <View style={styles.guardianStatus}>
+                <Ionicons name="checkmark-circle" size={24} color="#4ade80" />
+              </View>
             </View>
-          </Card>
+          ))
         )}
-
-        <Card style={styles.card}>
-          <Text style={styles.cardTitle}>
-            Guardians ({guardians.length})
-          </Text>
-          {guardians.length === 0 ? (
-            <Text style={styles.emptyText}>No emergency contacts added yet</Text>
-          ) : (
-            <View style={styles.guardiansList}>
-              {guardians.map((guardian) => (
-                <View key={guardian.id} style={styles.guardianItem}>
-                  <View style={styles.guardianInfo}>
-                    <Text style={styles.guardianName}>{guardian.name}</Text>
-                    <Text style={styles.guardianPhone}>{guardian.phone}</Text>
-                    {guardian.relationship && (
-                      <Text style={styles.guardianRelationship}>{guardian.relationship}</Text>
-                    )}
-                  </View>
-                  <TouchableOpacity
-                    onPress={() => handleRemoveGuardian(guardian.id)}
-                    style={styles.removeButton}
-                  >
-                    <Ionicons name="close-circle" size={24} color="#ef4444" />
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </View>
-          )}
-        </Card>
       </ScrollView>
+
+      <Modal visible={modalVisible} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Add Guardian</Text>
+            <TextInput style={styles.modalInput} placeholder="Full Name" placeholderTextColor="#999" value={newGuardian.name} onChangeText={(t) => setNewGuardian({ ...newGuardian, name: t })} />
+            <TextInput style={styles.modalInput} placeholder="+91XXXXXXXXXX" placeholderTextColor="#999" keyboardType="phone-pad" value={newGuardian.phone} onChangeText={(t) => setNewGuardian({ ...newGuardian, phone: t })} />
+            <TextInput style={styles.modalInput} placeholder="Relationship (friend, family...)" placeholderTextColor="#999" value={newGuardian.relationship} onChangeText={(t) => setNewGuardian({ ...newGuardian, relationship: t })} />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.modalCancel} onPress={() => setModalVisible(false)}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalAdd} onPress={handleAddGuardian}>
+                <Text style={styles.modalAddText}>{loading ? 'Adding...' : 'Add'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    backgroundColor: 'rgba(126, 34, 206, 0.5)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-    paddingTop: 60,
-    paddingBottom: 16,
-  },
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 24,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-    flex: 1,
-    marginLeft: 12,
-  },
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#fff',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-  },
-  addButtonText: {
-    color: '#9333ea',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  scrollContent: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 24,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#e9d5ff',
-    marginBottom: 24,
-  },
-  card: {
-    padding: 24,
-    marginBottom: 24,
-  },
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 16,
-  },
-  formActions: {
-    gap: 12,
-    marginTop: 8,
-  },
-  saveButton: {
-    backgroundColor: '#fff',
-  },
-  guardiansList: {
-    gap: 12,
-  },
-  guardianItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 8,
-  },
-  guardianInfo: {
-    flex: 1,
-  },
-  guardianName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  guardianPhone: {
-    fontSize: 14,
-    color: '#e9d5ff',
-    marginBottom: 2,
-  },
-  guardianRelationship: {
-    fontSize: 12,
-    color: '#c084fc',
-  },
-  removeButton: {
-    padding: 8,
-  },
-  emptyText: {
-    color: '#e9d5ff',
-    textAlign: 'center',
-    paddingVertical: 24,
-  },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingTop: 60, paddingBottom: 16 },
+  headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
+  scrollContent: { padding: 24 },
+  emptyState: { alignItems: 'center', paddingTop: 60, gap: 16 },
+  emptyTitle: { fontSize: 24, fontWeight: 'bold', color: '#fff' },
+  emptySubtitle: { fontSize: 16, color: 'rgba(255,255,255,0.7)', textAlign: 'center' },
+  addFirstButton: { marginTop: 16 },
+  guardianCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 16, padding: 16, marginBottom: 12, gap: 16 },
+  guardianAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
+  guardianInfo: { flex: 1 },
+  guardianName: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
+  guardianPhone: { fontSize: 14, color: 'rgba(255,255,255,0.8)' },
+  guardianRel: { fontSize: 12, color: 'rgba(255,255,255,0.6)' },
+  guardianStatus: { alignItems: 'center' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24 },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a', marginBottom: 20 },
+  modalInput: { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12, padding: 14, marginBottom: 12, fontSize: 16, color: '#1a1a1a' },
+  modalButtons: { flexDirection: 'row', gap: 12, marginTop: 8 },
+  modalCancel: { flex: 1, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#e5e7eb', alignItems: 'center' },
+  modalCancelText: { color: '#6b7280', fontWeight: '600' },
+  modalAdd: { flex: 1, padding: 14, borderRadius: 12, backgroundColor: '#9333ea', alignItems: 'center' },
+  modalAddText: { color: '#fff', fontWeight: '600' },
 });

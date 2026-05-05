@@ -14,6 +14,7 @@ export default function DashboardScreen({ navigation }: any) {
   const [recentReports, setRecentReports] = useState<any[]>([]);
 
   useEffect(() => {
+    fetch('http://10.117.78.199:3000/health').then(r => r.json()).then(d => console.log('Backend:', d)).catch(e => console.log('Backend offline:', e));
     loadUserData();
     loadSafetyReports();
     requestLocationPermission();
