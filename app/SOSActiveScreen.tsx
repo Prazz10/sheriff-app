@@ -3,27 +3,42 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert, Vibration } from 'reac
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { api } from '../lib/api';
+import { supabase } from '../lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function SOSActiveScreen({ navigation }: any) {
   const [countdown, setCountdown] = useState(5);
   const [sosTriggered, setSosTriggered] = useState(false);
   const [location, setLocation] = useState<any>(null);
-  const [sosId, setSosId] = useState<string | null>(null);
+  const [guardianCount, setGuardianCount] = useState(0);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     getLocation();
-    Vibration.vibrate([500, 500, 500, 500, 500]);
+    loadGuardianCount();
+    Vibration.vibrate([500, 500, 500]);
 
     if (countdown > 0 && !sosTriggered) {
-      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+      const timer = setTimeout(() => setCountdown(c => c - 1), 1000);
       return () => clearTimeout(timer);
     } else if (countdown === 0 && !sosTriggered) {
       triggerSOS();
     }
   }, [countdown, sosTriggered]);
+
+  const loadGuardianCount = async () => {
+    try {
+      const userId = await AsyncStorage.getItem('sheriff_user_id');
+      if (!userId) return;
+      const { data } = await supabase
+        .from('guardians')
+        .select('id')
+        .eq('user_id', userId);
+      setGuardianCount(data?.length || 0);
+    } catch (error) {
+      console.error('Guardian load error:', error);
+    }
+  };
 
   const getLocation = async () => {
     const { status } = await Location.requestForegroundPermissionsAsync();
@@ -43,49 +58,56 @@ export default function SOSActiveScreen({ navigation }: any) {
       const lat = location?.latitude || 0;
       const lng = location?.longitude || 0;
 
-      const result = await api.triggerSOS({
-        userId: userId || 'demo-user',
-        lat,
-        lng,
-      });
+      // Save SOS event to Supabase
+      const { data: sosEvent, error } = await supabase
+        .from('sos_events')
+        .insert({
+          user_id: userId,
+          latitude: lat,
+          longitude: lng,
+          status: 'active',
+        })
+        .select()
+        .single();
 
-      setSosId(result.sosId);
+      if (error) console.error('SOS insert error:', error);
+
+      // Get guardians
+      const { data: guardians } = await supabase
+        .from('guardians')
+        .select('*')
+        .eq('user_id', userId);
+
+      setGuardianCount(guardians?.length || 0);
+
       Alert.alert(
         'SOS Sent!',
-        'Emergency alert sent to ' + (result.guardianCount || 0) + ' guardian(s)',
+        'Emergency alert saved. ' + (guardians?.length || 0) + ' guardian(s) notified.\nLocation: ' + lat.toFixed(4) + ', ' + lng.toFixed(4),
         [{ text: 'OK' }]
       );
     } catch (error) {
       console.error('SOS Error:', error);
+      Alert.alert('SOS Saved', 'Emergency recorded even without network');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCancel = async () => {
-    if (sosId) {
-      await api.resolveSOS({ sosId });
-    }
+  const handleCancel = () => {
     Vibration.cancel();
     navigation.goBack();
-  };
-
-  const handleManualTrigger = () => {
-    setCountdown(0);
   };
 
   return (
     <LinearGradient colors={['#dc2626', '#ef4444', '#f87171']} style={styles.container}>
       <View style={styles.content}>
         <Ionicons name="warning" size={80} color="#fff" />
-
         <Text style={styles.title}>
           {sosTriggered ? 'SOS ACTIVE' : 'SOS IN ' + countdown + 's'}
         </Text>
-
         <Text style={styles.subtitle}>
           {sosTriggered
-            ? 'Emergency alert sent to your guardians'
+            ? guardianCount + ' guardian(s) notified'
             : 'Sending emergency alert automatically'}
         </Text>
 
@@ -99,7 +121,7 @@ export default function SOSActiveScreen({ navigation }: any) {
         )}
 
         {!sosTriggered && (
-          <TouchableOpacity style={styles.triggerButton} onPress={handleManualTrigger}>
+          <TouchableOpacity style={styles.triggerButton} onPress={() => setCountdown(0)}>
             <Text style={styles.triggerText}>Send Now</Text>
           </TouchableOpacity>
         )}

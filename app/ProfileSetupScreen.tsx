@@ -55,7 +55,7 @@ export default function ProfileSetupScreen({ navigation }: any) {
   };
 
   return (
-    <LinearGradient colors={['#7c3aed', '#9333ea', '#a855f7']} style={styles.container}>
+    <LinearGradient colors={['#ffe5ec', '#ffb3c6', '#fb6f92']} style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <Text style={styles.title}>Complete Your{'\n'}Profile</Text>
         <Text style={styles.subtitle}>Set up your safety network and permissions</Text>

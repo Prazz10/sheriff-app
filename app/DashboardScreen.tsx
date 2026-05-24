@@ -7,6 +7,8 @@ import { Button } from '../components/Button';
 import { getUser, type User } from '../lib/auth';
 import { loadReports } from '../lib/safety-data';
 import * as Location from 'expo-location';
+import { supabase } from '../lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function DashboardScreen({ navigation }: any) {
   const [user, setUser] = useState<User | null>(null);
@@ -14,7 +16,7 @@ export default function DashboardScreen({ navigation }: any) {
   const [recentReports, setRecentReports] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch('http://10.117.78.199:3000/health').then(r => r.json()).then(d => console.log('Backend:', d)).catch(e => console.log('Backend offline:', e));
+    fetch('http://10.210.11.56:3000/health').then(r => r.json()).then(d => console.log('Backend:', d)).catch(e => console.log('Backend offline:', e));
     loadUserData();
     loadSafetyReports();
     requestLocationPermission();
@@ -43,7 +45,7 @@ export default function DashboardScreen({ navigation }: any) {
 
   return (
     <LinearGradient
-      colors={['#4f46e5', '#7c3aed', '#ec4899']}
+      colors={['#ffe5ec', '#ffb3c6', '#fb6f92']}
       style={styles.container}
     >
       <View style={styles.header}>

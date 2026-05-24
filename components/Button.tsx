@@ -61,7 +61,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   primary: {
-    backgroundColor: '#fff',
+    backgroundColor: '#fb6f92',
   },
   outline: {
     backgroundColor: 'transparent',
@@ -90,7 +90,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   text_primary: {
-    color: '#9333ea',
+    color: '#ffffff',
   },
   text_outline: {
     color: '#fff',

@@ -3,7 +3,7 @@
     "name": "SheRiff-V4",
     "slug": "SheRiff-V4",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,

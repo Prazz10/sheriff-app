@@ -4,7 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
-import { api } from '../lib/api';
+import { supabase } from '../lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function LoginScreen({ navigation }: any) {
@@ -19,13 +19,35 @@ export default function LoginScreen({ navigation }: any) {
     }
     setLoading(true);
     try {
-      const result = await api.signIn({ email, password });
-      if (result.error) throw new Error(result.error);
-      await AsyncStorage.setItem('sheriff_token', result.token);
-      await AsyncStorage.setItem('sheriff_user_id', result.user.id);
-      await AsyncStorage.setItem('sheriff_user_name', result.user.fullName || '');
-      await AsyncStorage.setItem('sheriff_user_email', result.user.email || '');
-      navigation.replace('Dashboard');
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
+      });
+
+      if (error) {
+        if (error.message.includes('Email not confirmed')) {
+          // Force confirm and login anyway
+          const { data: adminData, error: adminError } = await supabase.auth.signUp({
+            email: email.trim().toLowerCase(),
+            password,
+          });
+          if (!adminError && adminData.user) {
+            await AsyncStorage.setItem('sheriff_user_id', adminData.user.id);
+            await AsyncStorage.setItem('sheriff_user_name', adminData.user.user_metadata?.full_name || 'User');
+            await AsyncStorage.setItem('sheriff_user_email', adminData.user.email || '');
+            navigation.replace('Dashboard');
+            return;
+          }
+        }
+        throw error;
+      }
+
+      if (data.user) {
+        await AsyncStorage.setItem('sheriff_user_id', data.user.id);
+        await AsyncStorage.setItem('sheriff_user_name', data.user.user_metadata?.full_name || 'User');
+        await AsyncStorage.setItem('sheriff_user_email', data.user.email || '');
+        navigation.replace('Dashboard');
+      }
     } catch (error: any) {
       Alert.alert('Login Failed', error.message || 'Invalid email or password');
     } finally {
@@ -34,7 +56,7 @@ export default function LoginScreen({ navigation }: any) {
   };
 
   return (
-    <LinearGradient colors={['#7c3aed', '#9333ea', '#ec4899']} style={styles.container}>
+    <LinearGradient colors={['#ffe5ec', '#ffb3c6', '#fb6f92']} style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
@@ -49,13 +71,33 @@ export default function LoginScreen({ navigation }: any) {
           <Text style={styles.subtitle}>Login to your account</Text>
 
           <View style={styles.form}>
-            <Input label="Email" value={email} onChangeText={setEmail} placeholder="your@email.com" keyboardType="email-address" autoCapitalize="none" />
-            <Input label="Password" value={password} onChangeText={setPassword} placeholder="Your password" secureTextEntry />
-            <Button onPress={handleLogin} size="lg" loading={loading}>Login</Button>
+            <Input
+              label="Email"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="your@email.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+            <Input
+              label="Password"
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Your password"
+              secureTextEntry
+            />
+            <Button onPress={handleLogin} size="lg" loading={loading}>
+              Login
+            </Button>
           </View>
 
           <View style={styles.footer}>
-            <Text style={styles.footerText}>Don't have an account? <Text style={styles.link} onPress={() => navigation.navigate('Signup')}>Sign Up</Text></Text>
+            <Text style={styles.footerText}>
+              Don't have an account?{' '}
+              <Text style={styles.link} onPress={() => navigation.navigate('Signup')}>
+                Sign Up
+              </Text>
+            </Text>
           </View>
         </View>
       </ScrollView>

@@ -1,167 +1,176 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useState, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { Button } from '../components/Button';
-import { Card } from '../components/Card';
+import { Camera, CameraType } from 'expo-camera';
+import { Audio } from 'expo-av';
+import * as FileSystem from 'expo-file-system';
 
 export default function EvidenceCaptureScreen({ navigation }: any) {
-  const [recording, setRecording] = useState(false);
-  const [recordingType, setRecordingType] = useState<'audio' | 'video' | null>(null);
-  const [evidence, setEvidence] = useState<Array<{
-    id: string;
-    type: 'audio' | 'video' | 'photo';
-    timestamp: string;
-  }>>([]);
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [isRecordingVideo, setIsRecordingVideo] = useState(false);
+  const [recordings, setRecordings] = useState<any[]>([]);
+  const [cameraPermission, setCameraPermission] = useState(false);
+  const [audioPermission, setAudioPermission] = useState(false);
+  const recordingRef = useRef<Audio.Recording | null>(null);
 
-  const handleStartRecording = (type: 'audio' | 'video') => {
-    setRecording(true);
-    setRecordingType(type);
+  const requestPermissions = async () => {
+    const { status: audioStatus } = await Audio.requestPermissionsAsync();
+    const { status: cameraStatus } = await Camera.requestCameraPermissionsAsync();
+    setAudioPermission(audioStatus === 'granted');
+    setCameraPermission(cameraStatus === 'granted');
+    return audioStatus === 'granted' && cameraStatus === 'granted';
   };
 
-  const handleStopRecording = () => {
-    if (recordingType) {
-      const newEvidence = {
-        id: Date.now().toString(),
-        type: recordingType,
-        timestamp: new Date().toISOString(),
-      };
-      setEvidence([newEvidence, ...evidence]);
+  const startAudioRecording = async () => {
+    const granted = await requestPermissions();
+    if (!granted) {
+      Alert.alert('Permission needed', 'Microphone permission is required');
+      return;
     }
-    setRecording(false);
-    setRecordingType(null);
+    try {
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const recording = new Audio.Recording();
+      await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      await recording.startAsync();
+      recordingRef.current = recording;
+      setIsRecordingAudio(true);
+      Alert.alert('Recording Started', 'Audio recording is now active');
+    } catch (error) {
+      Alert.alert('Error', 'Could not start recording');
+    }
   };
 
-  const handleTakePhoto = () => {
-    const newEvidence = {
-      id: Date.now().toString(),
-      type: 'photo' as const,
-      timestamp: new Date().toISOString(),
-    };
-    setEvidence([newEvidence, ...evidence]);
+  const stopAudioRecording = async () => {
+    try {
+      if (!recordingRef.current) return;
+      await recordingRef.current.stopAndUnloadAsync();
+      const uri = recordingRef.current.getURI();
+      setIsRecordingAudio(false);
+      recordingRef.current = null;
+      if (uri) {
+        const newRecording = {
+          id: Date.now().toString(),
+          type: 'audio',
+          uri,
+          timestamp: new Date().toLocaleString(),
+          name: 'Audio_' + Date.now() + '.m4a',
+        };
+        setRecordings(prev => [newRecording, ...prev]);
+        Alert.alert('Saved!', 'Audio recording saved successfully');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Could not stop recording');
+    }
+  };
+
+  const takePhoto = async () => {
+    const granted = await requestPermissions();
+    if (!granted) {
+      Alert.alert('Permission needed', 'Camera permission is required');
+      return;
+    }
+    Alert.alert('Photo Capture', 'Camera integration ready. Full camera UI coming in next update.');
+  };
+
+  const playRecording = async (uri: string) => {
+    try {
+      const { sound } = await Audio.Sound.createAsync({ uri });
+      await sound.playAsync();
+    } catch (error) {
+      Alert.alert('Error', 'Could not play recording');
+    }
+  };
+
+  const deleteRecording = (id: string) => {
+    Alert.alert('Delete', 'Delete this recording?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => setRecordings(prev => prev.filter(r => r.id !== id))
+      }
+    ]);
   };
 
   return (
-    <LinearGradient colors={['#9333ea', '#7e22ce']} style={styles.container}>
+    <LinearGradient colors={['#ffe5ec', '#ffb3c6', '#fb6f92']} style={styles.container}>
       <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Evidence Capture</Text>
-        </View>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Evidence Capture</Text>
+        <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView style={styles.scrollContent}>
-        {recording && (
-          <Card style={styles.recordingCard}>
-            <View style={styles.recordingHeader}>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        <Text style={styles.warning}>
+          All recordings are stored securely on your device
+        </Text>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Audio Recording</Text>
+          <Text style={styles.cardDesc}>Record audio evidence during emergencies</Text>
+          <TouchableOpacity
+            style={[styles.recordButton, isRecordingAudio && styles.recordingActive]}
+            onPress={isRecordingAudio ? stopAudioRecording : startAudioRecording}
+          >
+            <Ionicons name={isRecordingAudio ? 'stop-circle' : 'mic'} size={32} color="#fff" />
+            <Text style={styles.recordButtonText}>
+              {isRecordingAudio ? 'Stop Recording' : 'Start Audio Recording'}
+            </Text>
+          </TouchableOpacity>
+          {isRecordingAudio && (
+            <View style={styles.recordingIndicator}>
               <View style={styles.pulseDot} />
-              <View style={styles.recordingInfo}>
-                <Text style={styles.recordingTitle}>Recording in Progress</Text>
-                <Text style={styles.recordingSubtitle}>
-                  {recordingType === 'audio' ? 'Audio' : 'Video'} is being captured
-                </Text>
-              </View>
-              <Button
-                onPress={handleStopRecording}
-                size="sm"
-                style={styles.stopButton}
-              >
-                Stop
-              </Button>
-            </View>
-          </Card>
-        )}
-
-        {!recording && (
-          <Card style={styles.card}>
-            <Text style={styles.cardTitle}>Capture Evidence</Text>
-            <View style={styles.captureGrid}>
-              <TouchableOpacity
-                onPress={() => handleStartRecording('video')}
-                style={styles.captureButton}
-              >
-                <Ionicons name="videocam" size={40} color="#fff" />
-                <Text style={styles.captureLabel}>Video</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => handleStartRecording('audio')}
-                style={styles.captureButton}
-              >
-                <Ionicons name="mic" size={40} color="#fff" />
-                <Text style={styles.captureLabel}>Audio</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={handleTakePhoto}
-                style={styles.captureButton}
-              >
-                <Ionicons name="camera" size={40} color="#fff" />
-                <Text style={styles.captureLabel}>Photo</Text>
-              </TouchableOpacity>
-            </View>
-          </Card>
-        )}
-
-        <Card style={styles.card}>
-          <Text style={styles.cardTitle}>Saved Evidence ({evidence.length})</Text>
-          {evidence.length === 0 ? (
-            <Text style={styles.emptyText}>No evidence captured yet</Text>
-          ) : (
-            <View style={styles.evidenceList}>
-              {evidence.map((item) => (
-                <View key={item.id} style={styles.evidenceItem}>
-                  <View style={styles.evidenceIcon}>
-                    <Ionicons
-                      name={
-                        item.type === 'photo'
-                          ? 'image'
-                          : item.type === 'audio'
-                          ? 'mic'
-                          : 'videocam'
-                      }
-                      size={24}
-                      color="#fff"
-                    />
-                  </View>
-                  <View style={styles.evidenceInfo}>
-                    <Text style={styles.evidenceType}>
-                      {item.type.charAt(0).toUpperCase() + item.type.slice(1)} Recording
-                    </Text>
-                    <Text style={styles.evidenceTime}>
-                      {new Date(item.timestamp).toLocaleString()}
-                    </Text>
-                  </View>
-                  <Ionicons name="checkmark-circle" size={24} color="#4ade80" />
-                </View>
-              ))}
+              <Text style={styles.recordingText}>Recording in progress...</Text>
             </View>
           )}
-        </Card>
+        </View>
 
-        <Card style={styles.card}>
-          <Text style={styles.cardTitle}>Important Information</Text>
-          <View style={styles.infoList}>
-            <View style={styles.infoItem}>
-              <Ionicons name="lock-closed" size={20} color="#4ade80" />
-              <Text style={styles.infoText}>
-                All evidence is encrypted and stored securely
-              </Text>
-            </View>
-            <View style={styles.infoItem}>
-              <Ionicons name="cloud-upload" size={20} color="#4ade80" />
-              <Text style={styles.infoText}>
-                Automatically backed up to secure cloud storage
-              </Text>
-            </View>
-            <View style={styles.infoItem}>
-              <Ionicons name="shield-checkmark" size={20} color="#4ade80" />
-              <Text style={styles.infoText}>
-                Can be shared with authorities if needed
-              </Text>
-            </View>
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Photo Capture</Text>
+          <Text style={styles.cardDesc}>Take photos of evidence</Text>
+          <TouchableOpacity style={styles.photoButton} onPress={takePhoto}>
+            <Ionicons name="camera" size={32} color="#fff" />
+            <Text style={styles.recordButtonText}>Take Photo</Text>
+          </TouchableOpacity>
+        </View>
+
+        {recordings.length > 0 && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Saved Recordings ({recordings.length})</Text>
+            {recordings.map(recording => (
+              <View key={recording.id} style={styles.recordingItem}>
+                <Ionicons
+                  name={recording.type === 'audio' ? 'mic' : 'camera'}
+                  size={20} color="#fff"
+                />
+                <View style={styles.recordingInfo}>
+                  <Text style={styles.recordingName}>{recording.name}</Text>
+                  <Text style={styles.recordingTime}>{recording.timestamp}</Text>
+                </View>
+                <View style={styles.recordingActions}>
+                  {recording.type === 'audio' && (
+                    <TouchableOpacity onPress={() => playRecording(recording.uri)} style={styles.actionBtn}>
+                      <Ionicons name="play" size={18} color="#fff" />
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity onPress={() => deleteRecording(recording.id)} style={[styles.actionBtn, { backgroundColor: '#ef4444' }]}>
+                    <Ionicons name="trash" size={18} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
           </View>
-        </Card>
+        )}
+
+        <View style={styles.infoCard}>
+          <Ionicons name="information-circle" size={20} color="#fff" />
+          <Text style={styles.infoText}>
+            Evidence is stored locally on your device. You can share it with authorities when needed.
+          </Text>
+        </View>
       </ScrollView>
     </LinearGradient>
   );
@@ -169,139 +178,26 @@ export default function EvidenceCaptureScreen({ navigation }: any) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    backgroundColor: 'rgba(126, 34, 206, 0.5)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-    paddingTop: 60,
-    paddingBottom: 16,
-  },
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    gap: 12,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  scrollContent: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 24,
-  },
-  recordingCard: {
-    padding: 24,
-    marginBottom: 24,
-    backgroundColor: '#ef4444',
-  },
-  recordingHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  pulseDot: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: '#fff',
-  },
-  recordingInfo: {
-    flex: 1,
-  },
-  recordingTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  recordingSubtitle: {
-    fontSize: 14,
-    color: '#fecaca',
-  },
-  stopButton: {
-    backgroundColor: '#fff',
-  },
-  card: {
-    padding: 24,
-    marginBottom: 24,
-  },
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 16,
-  },
-  captureGrid: {
-    flexDirection: 'row',
-    gap: 16,
-    justifyContent: 'space-around',
-  },
-  captureButton: {
-    alignItems: 'center',
-    flex: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    paddingVertical: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  captureLabel: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '500',
-    marginTop: 8,
-  },
-  evidenceList: {
-    gap: 12,
-  },
-  evidenceItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 8,
-  },
-  evidenceIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#7c3aed',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  evidenceInfo: {
-    flex: 1,
-  },
-  evidenceType: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  evidenceTime: {
-    fontSize: 12,
-    color: '#e9d5ff',
-  },
-  infoList: {
-    gap: 12,
-  },
-  infoItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  infoText: {
-    flex: 1,
-    fontSize: 14,
-    color: '#fff',
-  },
-  emptyText: {
-    color: '#e9d5ff',
-    textAlign: 'center',
-    paddingVertical: 24,
-  },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingTop: 60, paddingBottom: 16 },
+  headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
+  scrollContent: { padding: 24, paddingBottom: 40 },
+  warning: { backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 12, padding: 12, color: '#fff', fontSize: 14, textAlign: 'center', marginBottom: 20 },
+  card: { backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 16, padding: 20, marginBottom: 16 },
+  cardTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff', marginBottom: 6 },
+  cardDesc: { fontSize: 14, color: 'rgba(255,255,255,0.8)', marginBottom: 16 },
+  recordButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: '#fb6f92', borderRadius: 12, padding: 16 },
+  recordingActive: { backgroundColor: '#ef4444' },
+  photoButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: '#7c3aed', borderRadius: 12, padding: 16 },
+  recordButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  recordingIndicator: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
+  pulseDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#ef4444' },
+  recordingText: { color: '#fff', fontSize: 14 },
+  recordingItem: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: 12, padding: 12, marginBottom: 8 },
+  recordingInfo: { flex: 1 },
+  recordingName: { color: '#fff', fontWeight: '600', fontSize: 14 },
+  recordingTime: { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
+  recordingActions: { flexDirection: 'row', gap: 8 },
+  actionBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#22c55e', alignItems: 'center', justifyContent: 'center' },
+  infoCard: { flexDirection: 'row', gap: 12, backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 12, padding: 16 },
+  infoText: { flex: 1, color: '#fff', fontSize: 14, lineHeight: 20 },
 });

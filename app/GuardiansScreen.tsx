@@ -61,7 +61,7 @@ export default function GuardiansScreen({ navigation }: any) {
   };
 
   return (
-    <LinearGradient colors={['#7c3aed', '#9333ea']} style={styles.container}>
+    <LinearGradient colors={['#ffe5ec', '#ffb3c6', '#fb6f92']} style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color="#fff" />

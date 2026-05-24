@@ -79,7 +79,7 @@ export default function SignupScreen({ navigation }: any) {
   };
 
   return (
-    <LinearGradient colors={['#059669', '#14b8a6', '#06b6d4']} style={styles.container}>
+    <LinearGradient colors={['#ffe5ec', '#ffb3c6', '#fb6f92']} style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>

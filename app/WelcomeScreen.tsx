@@ -19,7 +19,7 @@ export default function WelcomeScreen({ navigation }: any) {
 
   return (
     <LinearGradient
-      colors={['#9333ea', '#a855f7', '#ec4899']}
+      colors={['#ffe5ec', '#ffb3c6', '#fb6f92']}
       style={styles.container}
     >
       <ScrollView contentContainerStyle={styles.scrollContent}>
