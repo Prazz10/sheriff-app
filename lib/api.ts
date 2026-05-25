@@ -1,15 +1,29 @@
 import { supabase } from './supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+const BACKEND_URL = 'http://10.210.11.56:3000/api';
+
+async function backendPost(endpoint: string, data: any) {
+  try {
+    const response = await fetch(BACKEND_URL + endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return response.json();
+  } catch (error) {
+    console.log('Backend unreachable, skipping:', endpoint);
+    return { success: false };
+  }
+}
+
 export const api = {
   signUp: async (data: { email: string; password: string; fullName: string; phone?: string }) => {
     try {
       const { data: result, error } = await supabase.auth.signUp({
         email: data.email,
         password: data.password,
-        options: {
-          data: { full_name: data.fullName }
-        }
+        options: { data: { full_name: data.fullName } }
       });
       if (error) throw error;
       return { userId: result.user?.id, message: 'Account created successfully' };
@@ -51,6 +65,12 @@ export const api = {
       return { error: error.message };
     }
   },
+
+  sendSOSAlert: (data: { userId: string; lat: number; lng: number }) =>
+    backendPost('/notify/sos', data),
+
+  sendLocationAlert: (data: { userId: string; lat: number; lng: number; duration: number }) =>
+    backendPost('/notify/location', data),
 
   triggerSOS: async (data: { userId: string; lat: number; lng: number }) => {
     try {

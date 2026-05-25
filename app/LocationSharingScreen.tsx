@@ -1,128 +1,224 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Linking } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../components/Button';
-import { Card } from '../components/Card';
-import { Checkbox } from '../components/Checkbox';
-import { getUser, type User } from '../lib/auth';
+import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '../lib/supabase';
 
 export default function LocationSharingScreen({ navigation }: any) {
-  const [user, setUser] = useState<User | null>(null);
-  const [selectedGuardians, setSelectedGuardians] = useState<string[]>([]);
-  const [duration, setDuration] = useState<number | null>(null);
   const [isSharing, setIsSharing] = useState(false);
+  const [duration, setDuration] = useState<number | null>(null);
+  const [timeLeft, setTimeLeft] = useState(0);
+  const [currentAddress, setCurrentAddress] = useState('Fetching location...');
+  const [currentLocation, setCurrentLocation] = useState<any>(null);
+  const [guardians, setGuardians] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const timerRef = useRef<any>(null);
+  const locationRef = useRef<any>(null);
+  const tripId = useRef('trip_' + Date.now());
 
-  React.useEffect(() => {
-    loadUser();
+  useEffect(() => {
+    getCurrentLocation();
+    loadGuardians();
+    return () => stopAllServices();
   }, []);
 
-  const loadUser = async () => {
-    const userData = await getUser();
-    setUser(userData);
+  const getCurrentLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+      const loc = await Location.getCurrentPositionAsync({});
+      setCurrentLocation(loc.coords);
+      const address = await Location.reverseGeocodeAsync(loc.coords);
+      if (address[0]) {
+        setCurrentAddress(
+          (address[0].street || '') + ', ' + (address[0].city || '')
+        );
+      }
+    } catch (error) {
+      console.error('Location error:', error);
+    }
   };
 
-  const handleToggleGuardian = (guardianId: string) => {
-    setSelectedGuardians((prev) =>
-      prev.includes(guardianId)
-        ? prev.filter((id) => id !== guardianId)
-        : [...prev, guardianId]
-    );
+  const loadGuardians = async () => {
+    try {
+      const userId = await AsyncStorage.getItem('sheriff_user_id');
+      if (!userId) return;
+      const { data } = await supabase
+        .from('guardians')
+        .select('*')
+        .eq('user_id', userId);
+      setGuardians(data || []);
+    } catch (error) {
+      console.error('Load guardians error:', error);
+    }
   };
 
-  const handleStartSharing = () => {
-    if (selectedGuardians.length === 0 || !duration) {
+  const stopAllServices = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (locationRef.current) locationRef.current.remove();
+  };
+
+  const handleStartSharing = async () => {
+    if (!duration) {
+      Alert.alert('Select Duration', 'Please select how long to share');
       return;
     }
-    setIsSharing(true);
+    setLoading(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Location permission is required');
+        setLoading(false);
+        return;
+      }
+
+      const userId = await AsyncStorage.getItem('sheriff_user_id');
+
+      // Save trip to Supabase
+      await supabase.from('trips').insert({
+        id: tripId.current,
+        user_id: userId,
+        origin: currentAddress,
+        destination: 'Live Sharing',
+        status: 'active',
+      });
+
+      // Start watching location
+      locationRef.current = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 10 },
+        async (loc) => {
+          setCurrentLocation(loc.coords);
+          try {
+            const address = await Location.reverseGeocodeAsync(loc.coords);
+            if (address[0]) {
+              setCurrentAddress((address[0].street || '') + ', ' + (address[0].city || ''));
+            }
+          } catch (e) {}
+
+          // Save location to Supabase
+          await supabase.from('location_events').insert({
+            trip_id: tripId.current,
+            user_id: userId,
+            latitude: loc.coords.latitude,
+            longitude: loc.coords.longitude,
+          });
+        }
+      );
+
+      // Start countdown
+      setTimeLeft(duration * 60);
+      timerRef.current = setInterval(() => {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            handleStopSharing();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      setIsSharing(true);
+      // Send location link to all guardians via WhatsApp
+      if (guardians.length > 0 && currentLocation) {
+        const trackingLink = 'https://www.google.com/maps/search/?api=1&query=' + currentLocation.latitude + ',' + currentLocation.longitude;
+        const message = 'SheRiff Safety Alert: I am sharing my live location with you. Track me here: ' + trackingLink + ' (Updates every 5 mins)';
+        for (const g of guardians) {
+          const phone = g.guardian_phone.replace(/[^0-9]/g, '');
+          const whatsappUrl = 'whatsapp://send?phone=' + phone + '&text=' + encodeURIComponent(message);
+          Linking.openURL(whatsappUrl).catch(() => {
+            Linking.openURL('sms:' + g.guardian_phone + '?body=' + encodeURIComponent(message));
+          });
+        }
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Could not start location sharing');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleStopSharing = () => {
+  const handleStopSharing = async () => {
+    stopAllServices();
+    await supabase
+      .from('trips')
+      .update({ status: 'completed', ended_at: new Date().toISOString() })
+      .eq('id', tripId.current);
     setIsSharing(false);
-    navigation.navigate('Dashboard');
+    setTimeLeft(0);
+    Alert.alert('Stopped', 'Location sharing has ended');
+    navigation.goBack();
   };
 
   const handleExtendTime = () => {
-    const newDuration = duration === 60 ? 120 : 60;
-    setDuration(newDuration);
+    setTimeLeft(prev => prev + 30 * 60);
+    Alert.alert('Extended', '30 minutes added');
+  };
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return m + ':' + (s < 10 ? '0' + s : s);
   };
 
   if (isSharing) {
-    const selectedGuardiansList = user?.guardians.filter((g) =>
-      selectedGuardians.includes(g.id)
-    );
-
     return (
-      <LinearGradient colors={['#9333ea', '#7e22ce']} style={styles.container}>
+      <LinearGradient colors={['#ffe5ec', '#ffb3c6', '#fb6f92']} style={styles.container}>
         <View style={styles.header}>
-          <View style={styles.headerContent}>
-            <View style={styles.pulseDot} />
-            <Text style={styles.headerTitle}>Location Sharing Active</Text>
-          </View>
+          <View style={styles.pulseDot} />
+          <Text style={styles.headerTitle}>Sharing Live Location</Text>
+          <View style={{ width: 24 }} />
         </View>
 
-        <ScrollView style={styles.scrollContent}>
-          <Card style={styles.statusCard}>
-            <View style={styles.statusIcon}>
-              <Ionicons name="location" size={40} color="#fff" />
-            </View>
-            <Text style={styles.statusTitle}>Sharing Location</Text>
-            <Text style={styles.statusSubtitle}>Your guardians can see your live location</Text>
-          </Card>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          <View style={styles.statusCard}>
+            <Ionicons name="location" size={48} color="#fff" />
+            <Text style={styles.statusTitle}>Live Sharing Active</Text>
+            <Text style={styles.statusSubtitle}>
+              {guardians.length} guardian(s) can track you
+            </Text>
+          </View>
 
-          <Card style={styles.card}>
-            <View style={styles.timeHeader}>
-              <Ionicons name="time" size={24} color="#fff" />
-              <View style={styles.timeText}>
-                <Text style={styles.timeLabel}>Time Remaining</Text>
-                <Text style={styles.timeValue}>{duration} min</Text>
-              </View>
+          <View style={styles.card}>
+            <Ionicons name="time" size={24} color="#fff" />
+            <View style={styles.cardContent}>
+              <Text style={styles.cardLabel}>Time Remaining</Text>
+              <Text style={styles.timerValue}>{formatTime(timeLeft)}</Text>
             </View>
-          </Card>
+          </View>
 
-          <Card style={styles.card}>
-            <View style={styles.sharingHeader}>
-              <Ionicons name="people" size={20} color="#fff" />
-              <Text style={styles.cardTitle}>Sharing With</Text>
+          <View style={styles.card}>
+            <Ionicons name="location" size={20} color="#fff" />
+            <View style={styles.cardContent}>
+              <Text style={styles.cardLabel}>Current Location</Text>
+              <Text style={styles.cardValue}>{currentAddress}</Text>
+              {currentLocation && (
+                <Text style={styles.cardCoords}>
+                  {currentLocation.latitude.toFixed(4)}, {currentLocation.longitude.toFixed(4)}
+                </Text>
+              )}
             </View>
-            {selectedGuardiansList?.map((guardian) => (
-              <View key={guardian.id} style={styles.guardianItem}>
-                <Ionicons name="checkmark-circle" size={20} color="#4ade80" />
-                <View style={styles.guardianInfo}>
-                  <Text style={styles.guardianName}>{guardian.name}</Text>
-                  <Text style={styles.guardianPhone}>{guardian.phone}</Text>
+          </View>
+
+          {guardians.length > 0 && (
+            <View style={styles.guardiansCard}>
+              <Text style={styles.guardiansTitle}>Sharing With</Text>
+              {guardians.map((g, i) => (
+                <View key={i} style={styles.guardianRow}>
+                  <Ionicons name="checkmark-circle" size={20} color="#4ade80" />
+                  <Text style={styles.guardianName}>{g.guardian_name}</Text>
                 </View>
-              </View>
-            ))}
-          </Card>
-
-          <Card style={styles.card}>
-            <View style={styles.locationInfo}>
-              <Ionicons name="location" size={20} color="#fff" />
-              <View style={styles.locationText}>
-                <Text style={styles.locationLabel}>Current Location</Text>
-                <Text style={styles.locationValue}>Market Street, San Francisco, CA</Text>
-                <Text style={styles.locationTime}>Updated just now</Text>
-              </View>
+              ))}
             </View>
-          </Card>
+          )}
 
           <View style={styles.actions}>
-            <Button
-              onPress={handleExtendTime}
-              variant="outline"
-              size="lg"
-            >
-              <View style={styles.buttonContent}>
-                <Ionicons name="time" size={20} color="#fff" />
-                <Text style={styles.extendText}>Extend Time</Text>
-              </View>
+            <Button onPress={handleExtendTime} variant="outline" size="lg">
+              + Extend 30 min
             </Button>
-            <Button
-              onPress={handleStopSharing}
-              size="lg"
-              style={styles.stopButton}
-            >
+            <Button onPress={handleStopSharing} size="lg" style={styles.stopButton}>
               Stop Sharing
             </Button>
           </View>
@@ -132,120 +228,63 @@ export default function LocationSharingScreen({ navigation }: any) {
   }
 
   return (
-    <LinearGradient colors={['#9333ea', '#7e22ce']} style={styles.container}>
+    <LinearGradient colors={['#ffe5ec', '#ffb3c6', '#fb6f92']} style={styles.container}>
       <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Share Live Location</Text>
-        </View>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Share Live Location</Text>
+        <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView style={styles.scrollContent}>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
         <Text style={styles.title}>Share Your Location</Text>
-        <Text style={styles.subtitle}>Let your guardians know where you are in real-time</Text>
+        <Text style={styles.subtitle}>Let your guardians track you in real-time</Text>
 
-        <Card style={styles.card}>
-          <Text style={styles.cardTitle}>Select Guardians</Text>
-          {user && user.guardians.length > 0 ? (
-            <View style={styles.guardiansList}>
-              {user.guardians.map((guardian) => (
-                <TouchableOpacity
-                  key={guardian.id}
-                  onPress={() => handleToggleGuardian(guardian.id)}
-                  style={styles.guardianSelectItem}
-                >
-                  <Checkbox
-                    checked={selectedGuardians.includes(guardian.id)}
-                    onCheckedChange={() => handleToggleGuardian(guardian.id)}
-                  />
-                  <View style={styles.guardianSelectInfo}>
-                    <Text style={styles.guardianSelectName}>{guardian.name}</Text>
-                    <Text style={styles.guardianSelectPhone}>{guardian.phone}</Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
+        {currentLocation && (
+          <View style={styles.card}>
+            <Ionicons name="location" size={20} color="#fff" />
+            <View style={styles.cardContent}>
+              <Text style={styles.cardLabel}>Your Current Location</Text>
+              <Text style={styles.cardValue}>{currentAddress}</Text>
             </View>
-          ) : (
-            <View style={styles.noGuardians}>
-              <Text style={styles.noGuardiansText}>No emergency contacts added yet</Text>
-              <Button
-                onPress={() => navigation.navigate('Guardians')}
-                variant="outline"
-                style={styles.addButton}
-              >
-                Add Guardians
-              </Button>
-            </View>
-          )}
-        </Card>
+          </View>
+        )}
 
-        <Card style={styles.card}>
-          <Text style={styles.cardTitle}>Duration</Text>
+        {guardians.length > 0 && (
+          <View style={styles.guardiansCard}>
+            <Text style={styles.guardiansTitle}>Your Guardians</Text>
+            {guardians.map((g, i) => (
+              <View key={i} style={styles.guardianRow}>
+                <Ionicons name="person" size={20} color="#fff" />
+                <Text style={styles.guardianName}>{g.guardian_name} — {g.guardian_phone}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        <View style={styles.durationCard}>
+          <Text style={styles.guardiansTitle}>Select Duration</Text>
           <View style={styles.durationGrid}>
-            {[15, 30, 60, 120, 180, 240].map((mins) => (
+            {[15, 30, 60, 120, 180, 240].map(mins => (
               <TouchableOpacity
                 key={mins}
                 onPress={() => setDuration(mins)}
-                style={[
-                  styles.durationButton,
-                  duration === mins && styles.durationButtonActive,
-                ]}
+                style={[styles.durationButton, duration === mins && styles.durationButtonActive]}
               >
-                <Text style={[
-                  styles.durationValue,
-                  duration === mins && styles.durationValueActive,
-                ]}>
+                <Text style={[styles.durationValue, duration === mins && styles.durationValueActive]}>
                   {mins}
                 </Text>
-                <Text style={[
-                  styles.durationLabel,
-                  duration === mins && styles.durationLabelActive,
-                ]}>
+                <Text style={[styles.durationUnit, duration === mins && styles.durationValueActive]}>
                   min
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
-        </Card>
+        </View>
 
-        <Card style={styles.card}>
-          <Text style={styles.cardTitle}>What Guardians Will See</Text>
-          <View style={styles.featuresList}>
-            <View style={styles.featureItem}>
-              <Ionicons name="checkmark-circle" size={20} color="#4ade80" />
-              <View style={styles.featureText}>
-                <Text style={styles.featureTitle}>Real-time location updates</Text>
-                <Text style={styles.featureDesc}>Continuous GPS tracking</Text>
-              </View>
-            </View>
-            <View style={styles.featureItem}>
-              <Ionicons name="checkmark-circle" size={20} color="#4ade80" />
-              <View style={styles.featureText}>
-                <Text style={styles.featureTitle}>Movement history</Text>
-                <Text style={styles.featureDesc}>See where you've been</Text>
-              </View>
-            </View>
-            <View style={styles.featureItem}>
-              <Ionicons name="checkmark-circle" size={20} color="#4ade80" />
-              <View style={styles.featureText}>
-                <Text style={styles.featureTitle}>Battery status</Text>
-                <Text style={styles.featureDesc}>They'll know when to call</Text>
-              </View>
-            </View>
-          </View>
-        </Card>
-
-        <Button
-          onPress={handleStartSharing}
-          size="lg"
-          style={styles.shareButton}
-        >
-          <View style={styles.buttonContent}>
-            <Ionicons name="share-social" size={20} color="#9333ea" />
-            <Text style={styles.shareText}>Start Sharing Location</Text>
-          </View>
+        <Button onPress={handleStartSharing} size="lg" loading={loading} style={styles.shareButton}>
+          Start Sharing Location
         </Button>
       </ScrollView>
     </LinearGradient>
@@ -253,266 +292,34 @@ export default function LocationSharingScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  header: {
-    backgroundColor: 'rgba(126, 34, 206, 0.5)',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-    paddingTop: 60,
-    paddingBottom: 16,
-  },
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    gap: 12,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  pulseDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#4ade80',
-  },
-  scrollContent: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 24,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#e9d5ff',
-    marginBottom: 24,
-  },
-  card: {
-    padding: 24,
-    marginBottom: 24,
-  },
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 16,
-  },
-  statusCard: {
-    padding: 24,
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  statusIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#22c55e',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  statusTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 8,
-  },
-  statusSubtitle: {
-    fontSize: 16,
-    color: '#e9d5ff',
-    textAlign: 'center',
-  },
-  timeHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  timeText: {
-    flex: 1,
-  },
-  timeLabel: {
-    fontSize: 14,
-    color: '#e9d5ff',
-    marginBottom: 4,
-  },
-  timeValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  sharingHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 16,
-  },
-  guardianItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 8,
-    marginBottom: 8,
-  },
-  guardianInfo: {
-    flex: 1,
-  },
-  guardianName: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  guardianPhone: {
-    fontSize: 12,
-    color: '#e9d5ff',
-  },
-  locationInfo: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  locationText: {
-    flex: 1,
-  },
-  locationLabel: {
-    fontSize: 14,
-    color: '#e9d5ff',
-    marginBottom: 4,
-  },
-  locationValue: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  locationTime: {
-    fontSize: 12,
-    color: '#e9d5ff',
-  },
-  actions: {
-    gap: 12,
-    marginBottom: 24,
-  },
-  buttonContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  extendText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  stopButton: {
-    backgroundColor: '#ef4444',
-  },
-  guardiansList: {
-    gap: 12,
-  },
-  guardianSelectItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 8,
-  },
-  guardianSelectInfo: {
-    flex: 1,
-  },
-  guardianSelectName: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  guardianSelectPhone: {
-    fontSize: 14,
-    color: '#e9d5ff',
-  },
-  noGuardians: {
-    alignItems: 'center',
-    paddingVertical: 16,
-  },
-  noGuardiansText: {
-    color: '#e9d5ff',
-    marginBottom: 16,
-  },
-  addButton: {
-    borderColor: '#fff',
-    borderWidth: 1,
-  },
-  durationGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  durationButton: {
-    width: '30%',
-    padding: 16,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center',
-  },
-  durationButtonActive: {
-    borderColor: '#fff',
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  durationValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#e9d5ff',
-  },
-  durationValueActive: {
-    color: '#fff',
-  },
-  durationLabel: {
-    fontSize: 12,
-    color: '#e9d5ff',
-  },
-  durationLabelActive: {
-    color: '#fff',
-  },
-  featuresList: {
-    gap: 12,
-  },
-  featureItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  featureText: {
-    flex: 1,
-  },
-  featureTitle: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  featureDesc: {
-    fontSize: 12,
-    color: '#e9d5ff',
-  },
-  shareButton: {
-    backgroundColor: '#fff',
-    marginBottom: 24,
-  },
-  shareText: {
-    color: '#9333ea',
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  container: { flex: 1 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingTop: 60, paddingBottom: 16 },
+  headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
+  pulseDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#4ade80' },
+  scrollContent: { padding: 24, paddingBottom: 40 },
+  title: { fontSize: 28, fontWeight: 'bold', color: '#fff', marginBottom: 8 },
+  subtitle: { fontSize: 16, color: 'rgba(255,255,255,0.8)', marginBottom: 24 },
+  statusCard: { alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 16, padding: 32, marginBottom: 16, gap: 12 },
+  statusTitle: { fontSize: 24, fontWeight: 'bold', color: '#fff' },
+  statusSubtitle: { fontSize: 16, color: 'rgba(255,255,255,0.9)', textAlign: 'center' },
+  card: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 16, padding: 20, marginBottom: 16, gap: 12 },
+  cardContent: { flex: 1 },
+  cardLabel: { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginBottom: 4 },
+  cardValue: { fontSize: 16, fontWeight: '600', color: '#fff' },
+  cardCoords: { fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 2 },
+  timerValue: { fontSize: 36, fontWeight: 'bold', color: '#fff' },
+  guardiansCard: { backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 16, padding: 20, marginBottom: 16 },
+  guardiansTitle: { fontSize: 16, fontWeight: 'bold', color: '#fff', marginBottom: 12 },
+  guardianRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
+  guardianName: { color: '#fff', fontSize: 15 },
+  durationCard: { backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 16, padding: 20, marginBottom: 16 },
+  durationGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 8 },
+  durationButton: { width: '30%', padding: 16, borderRadius: 12, borderWidth: 2, borderColor: 'rgba(255,255,255,0.3)', alignItems: 'center' },
+  durationButtonActive: { borderColor: '#fff', backgroundColor: 'rgba(255,255,255,0.3)' },
+  durationValue: { fontSize: 24, fontWeight: 'bold', color: 'rgba(255,255,255,0.7)' },
+  durationUnit: { fontSize: 12, color: 'rgba(255,255,255,0.7)' },
+  durationValueActive: { color: '#fff' },
+  shareButton: { marginTop: 8 },
+  actions: { gap: 12 },
+  stopButton: { backgroundColor: '#ef4444' },
 });

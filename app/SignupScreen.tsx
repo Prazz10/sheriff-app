@@ -6,6 +6,7 @@ import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { api } from '../lib/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '../lib/supabase';
 
 export default function SignupScreen({ navigation }: any) {
   const [activeTab, setActiveTab] = useState<'email' | 'phone'>('email');
@@ -33,6 +34,10 @@ export default function SignupScreen({ navigation }: any) {
       await AsyncStorage.setItem('sheriff_user_id', result.userId);
       await AsyncStorage.setItem('sheriff_user_name', name);
       await AsyncStorage.setItem('sheriff_user_email', email);
+      const { data: { user: newUser } } = await supabase.auth.getUser();
+      if (newUser) {
+        await supabase.from('users').upsert({ id: newUser.id, full_name: name, email: email.trim().toLowerCase(), phone: '' }, { onConflict: 'id' });
+      }
       navigation.navigate('ProfileSetup');
     } catch (error: any) {
       Alert.alert('Signup Failed', error.message || 'Something went wrong');
@@ -70,6 +75,10 @@ export default function SignupScreen({ navigation }: any) {
       if (result.error) throw new Error(result.error);
       await AsyncStorage.setItem('sheriff_user_name', name);
       await AsyncStorage.setItem('sheriff_user_phone', phone);
+      const { data: { user: newUser } } = await supabase.auth.getUser();
+      if (newUser) {
+        await supabase.from('users').upsert({ id: newUser.id, full_name: name, email: email.trim().toLowerCase(), phone: '' }, { onConflict: 'id' });
+      }
       navigation.navigate('ProfileSetup');
     } catch (error: any) {
       Alert.alert('Verification Failed', error.message || 'Invalid OTP');
