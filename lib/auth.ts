@@ -46,7 +46,24 @@ export async function saveUser(user: User) {
 
 export async function getUser(): Promise<User | null> {
   const data = await AsyncStorage.getItem('sheriff_user');
-  return data ? JSON.parse(data) : null;
+  if (data) return JSON.parse(data);
+
+  const id = await AsyncStorage.getItem('sheriff_user_id');
+  const name = await AsyncStorage.getItem('sheriff_user_name');
+  const email = await AsyncStorage.getItem('sheriff_user_email');
+  const phone = await AsyncStorage.getItem('sheriff_user_phone');
+
+  if (id || name) {
+    return {
+      id: id || '',
+      name: name || 'User',
+      email: email || '',
+      phone: phone || '',
+      guardians: [],
+      permissions: { location: true, camera: true, microphone: true, sms: true }
+    };
+  }
+  return null;
 }
 
 export async function logout() {

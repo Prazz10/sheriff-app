@@ -31,7 +31,7 @@ export default function SignupScreen({ navigation }: any) {
     try {
       const result = await api.signUp({ email, password, fullName: name });
       if (result.error) throw new Error(result.error);
-      await AsyncStorage.setItem('sheriff_user_id', result.userId);
+      await AsyncStorage.setItem('sheriff_user_id', result.userId || '');
       await AsyncStorage.setItem('sheriff_user_name', name);
       await AsyncStorage.setItem('sheriff_user_email', email);
       const { data: { user: newUser } } = await supabase.auth.getUser();

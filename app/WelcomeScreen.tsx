@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, Text, Image, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, Image, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../components/Button';
@@ -25,14 +25,16 @@ export default function WelcomeScreen({ navigation }: any) {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.content}>
           <Image
-            source={require('../assets/logo.jpeg')}
+            source={require('../assets/logo.png')}
             style={styles.logo}
             resizeMode="contain"
           />
 
-          <Text style={styles.title}>SheRiff</Text>
           <Text style={styles.subtitle}>
-            Your personal safety companion. Stay safe, stay connected.
+            Your Personal Safety Companion
+          </Text>
+          <Text style={styles.tagline}>
+            Stay Safe, Stay Connected
           </Text>
 
           <View style={styles.features}>
@@ -71,24 +73,54 @@ export default function WelcomeScreen({ navigation }: any) {
                 </Text>
               </View>
             </View>
+
+            <View style={styles.featureCard}>
+              <View style={[styles.featureIcon, { backgroundColor: '#a855f7' }]}>
+                <Ionicons name="videocam" size={24} color="#fff" />
+              </View>
+              <View style={styles.featureText}>
+                <Text style={styles.featureTitle}>Evidence Capture</Text>
+                <Text style={styles.featureDescription}>
+                  Record audio & video evidence during emergencies
+                </Text>
+              </View>
+            </View>
           </View>
         </View>
 
         <View style={styles.actions}>
-          <Button
+          <Pressable
             onPress={() => navigation.navigate('Signup')}
-            size="lg"
-            style={styles.primaryButton}
+            style={({ pressed }) => [
+              styles.welcomeButton,
+              pressed ? styles.outlineButtonFormat : styles.solidButtonFormat
+            ]}
           >
-            Get Started
-          </Button>
-          <Button
+            {({ pressed }) => (
+              <Text style={[
+                styles.buttonText,
+                pressed ? styles.outlineTextFormat : styles.solidTextFormat
+              ]}>
+                Get Started
+              </Text>
+            )}
+          </Pressable>
+          <Pressable
             onPress={() => navigation.navigate('Login')}
-            variant="outline"
-            size="lg"
+            style={({ pressed }) => [
+              styles.welcomeButton,
+              pressed ? styles.solidButtonFormat : styles.outlineButtonFormat
+            ]}
           >
-            Login
-          </Button>
+            {({ pressed }) => (
+              <Text style={[
+                styles.buttonText,
+                pressed ? styles.solidTextFormat : styles.outlineTextFormat
+              ]}>
+                Login
+              </Text>
+            )}
+          </Pressable>
         </View>
       </ScrollView>
     </LinearGradient>
@@ -113,7 +145,7 @@ const styles = StyleSheet.create({
   logo: {
     width: 256,
     height: 256,
-    marginBottom: 32,
+    marginBottom: 0,
   },
   title: {
     fontSize: 48,
@@ -122,8 +154,18 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   subtitle: {
-    fontSize: 20,
-    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#fff',
+    textAlign: 'center',
+    marginTop: -40,
+    marginBottom: 24,
+    maxWidth: 360,
+  },
+  tagline: {
+    fontSize: 18,
+    fontWeight: '500',
+    color: 'rgba(255, 255, 255, 0.8)',
     textAlign: 'center',
     marginBottom: 48,
     maxWidth: 360,
@@ -163,9 +205,33 @@ const styles = StyleSheet.create({
   actions: {
     paddingHorizontal: 24,
     paddingBottom: 32,
+    marginTop: 32,
     gap: 12,
   },
-  primaryButton: {
+  welcomeButton: {
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderWidth: 2,
+  },
+  solidButtonFormat: {
     backgroundColor: '#fff',
+    borderColor: '#fff',
+  },
+  outlineButtonFormat: {
+    backgroundColor: 'transparent',
+    borderColor: '#fff',
+  },
+  buttonText: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  solidTextFormat: {
+    color: '#fb6f92',
+  },
+  outlineTextFormat: {
+    color: '#fff',
   },
 });

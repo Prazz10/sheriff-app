@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BACKEND_URL = 'http://10.210.11.56:3000/api';
+const BACKEND_URL = 'http://10.210.18.237:3000/api';
 
 async function backendPost(endpoint: string, data: any) {
   try {

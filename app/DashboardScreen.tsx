@@ -52,7 +52,7 @@ export default function DashboardScreen({ navigation }: any) {
         <View style={styles.headerContent}>
           <View style={styles.headerLeft}>
             <Image
-              source={require('../assets/logo.jpeg')}
+              source={require('../assets/logo.png')}
               style={styles.logo}
               resizeMode="contain"
             />
@@ -107,8 +107,8 @@ export default function DashboardScreen({ navigation }: any) {
 
           <Card onPress={() => navigation.navigate('CommunityReports')} style={styles.actionCard}>
             <Ionicons name="location" size={32} color="#fff" />
-            <Text style={styles.actionTitle}>Safety Map</Text>
-            <Text style={styles.actionSubtitle}>Community reports</Text>
+            <Text style={styles.actionTitle}>Community Reports</Text>
+            <Text style={styles.actionSubtitle}>Safety map</Text>
           </Card>
 
           <Card onPress={() => navigation.navigate('SafePlaces')} style={styles.actionCard}>
@@ -138,7 +138,7 @@ export default function DashboardScreen({ navigation }: any) {
             <View style={styles.featureButtonContent}>
               <Ionicons name="people" size={20} color="#fff" />
               <Text style={styles.featureButtonText}>
-                Emergency Contacts ({user?.guardians.length || 0})
+                Emergency Contacts
               </Text>
             </View>
           </Button>
@@ -186,7 +186,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    backgroundColor: 'rgba(79, 70, 229, 0.5)',
+    backgroundColor: 'rgba(251, 111, 146, 0.9)',
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255, 255, 255, 0.1)',
     paddingTop: 60,

@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert, Vibration, Linking } f
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { api } from '../lib/api';
+import * as SMS from 'expo-sms';
 import { supabase } from '../lib/supabase';
 
 export default function SOSActiveScreen({ navigation }: any) {
@@ -42,8 +42,13 @@ export default function SOSActiveScreen({ navigation }: any) {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-        setLocation(loc.coords);
+        try {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          setLocation(loc.coords);
+        } catch {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          setLocation(loc.coords);
+        }
       }
     } catch (error) {}
   };
@@ -55,29 +60,6 @@ export default function SOSActiveScreen({ navigation }: any) {
       email: user.email || '',
       phone: user.phone || '',
     }, { onConflict: 'id' });
-  };
-
-  const sendWhatsAppAlerts = async (guardians: any[], userName: string, lat: number, lng: number) => {
-    const mapsLink = 'https://maps.google.com/?q=' + lat + ',' + lng;
-    const message = 'EMERGENCY SOS ALERT!\n' +
-      userName + ' needs immediate help!\n\n' +
-      'Last known location:\n' + mapsLink + '\n\n' +
-      'GPS: ' + lat.toFixed(6) + ', ' + lng.toFixed(6) + '\n' +
-      'Time: ' + new Date().toLocaleString() + '\n\n' +
-      'Sent via SheRiff Safety App';
-
-    for (const guardian of guardians) {
-      const phone = guardian.guardian_phone.replace(/[^0-9]/g, '');
-      const whatsappUrl = 'whatsapp://send?phone=' + phone + '&text=' + encodeURIComponent(message);
-      try {
-        await Linking.openURL(whatsappUrl);
-      } catch (e) {
-        // Fallback to SMS
-        try {
-          await Linking.openURL('sms:' + guardian.guardian_phone + '?body=' + encodeURIComponent(message));
-        } catch (smsError) {}
-      }
-    }
   };
 
   const triggerSOS = async () => {
@@ -103,7 +85,7 @@ export default function SOSActiveScreen({ navigation }: any) {
         status: 'active',
       });
 
-      // Get all guardians
+      // Get guardians
       const { data: guardians } = await supabase
         .from('guardians')
         .select('*')
@@ -113,16 +95,36 @@ export default function SOSActiveScreen({ navigation }: any) {
       setGuardianCount(count);
 
       const userName = user.user_metadata?.full_name || 'SheRiff User';
+      const mapsLink = lat !== 0
+        ? 'https://maps.google.com/?q=' + lat + ',' + lng
+        : 'Location unavailable';
+      const message = 'EMERGENCY SOS from SheRiff!\n' +
+        userName + ' needs immediate help!\n' +
+        'Location: ' + mapsLink + '\n' +
+        'Time: ' + new Date().toLocaleString();
 
-      if (count > 0 && lat !== 0) {
-        // Send WhatsApp alerts to all guardians
-        await sendWhatsAppAlerts(guardians!, userName, lat, lng);
+      if (count > 0 && guardians) {
+        const phones = guardians.map((g: any) => g.guardian_phone);
+
+        // Try SMS first (works directly from user's phone)
+        const smsAvailable = await SMS.isAvailableAsync();
+        if (smsAvailable) {
+          await SMS.sendSMSAsync(phones, message);
+        } else {
+          // Fallback to WhatsApp
+          for (const g of guardians) {
+            let phone = g.guardian_phone.replace(/[^0-9]/g, '');
+            if (phone.length === 10) phone = '91' + phone;
+            Linking.openURL('https://wa.me/' + phone + '?text=' + encodeURIComponent(message));
+          }
+        }
       }
 
       Alert.alert(
         'SOS Triggered!',
         count > 0
-          ? 'Emergency alert sent to ' + count + ' guardian(s) via WhatsApp!\nLocation shared: ' + lat.toFixed(4) + ', ' + lng.toFixed(4)
+          ? 'Emergency alert sent to ' + count + ' guardian(s)!\n' +
+            (lat !== 0 ? 'Location: ' + lat.toFixed(4) + ', ' + lng.toFixed(4) : 'Location pending')
           : 'SOS saved! Add guardians to send alerts.',
         [{ text: 'OK' }]
       );
@@ -147,7 +149,7 @@ export default function SOSActiveScreen({ navigation }: any) {
         </Text>
         <Text style={styles.subtitle}>
           {sosTriggered
-            ? guardianCount + ' guardian(s) notified via WhatsApp'
+            ? guardianCount + ' guardian(s) notified'
             : 'Sending emergency alert automatically'}
         </Text>
 
