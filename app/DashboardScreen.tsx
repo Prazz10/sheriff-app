@@ -52,7 +52,7 @@ export default function DashboardScreen({ navigation }: any) {
         <View style={styles.headerContent}>
           <View style={styles.headerLeft}>
             <Image
-              source={require('../assets/logo.png')}
+              source={require('../assets/logo.jpeg')}
               style={styles.logo}
               resizeMode="contain"
             />
